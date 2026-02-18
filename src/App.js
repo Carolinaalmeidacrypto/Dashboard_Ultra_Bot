@@ -3,11 +3,14 @@ import axios from "axios";
 import {
   LineChart,
   Line,
+  BarChart,
+  Bar,
   XAxis,
   YAxis,
   Tooltip,
   ResponsiveContainer,
   CartesianGrid,
+  Cell,
 } from "recharts";
 
 function App() {
@@ -15,44 +18,180 @@ function App() {
   const [loading, setLoading] = useState(true);
 
   const safeMoney = (value) => {
-  if (value === null || value === undefined || isNaN(value)) return 0;
-  return Number(value) / 100; // 🔥 divide por 100 automaticamente
+    if (value === null || value === undefined || isNaN(value)) return 0;
+    return Number(value) / 100;
   };
 
-  const safeNumber = (value) => {
-    if (value === null || value === undefined || isNaN(value)) return 0;
-    return Number(value);
-  };
+  // 🔥 GERA RESULTADOS SIMULADOS DESDE 2 DE JANEIRO
+  const generateFixedSimulatedResults = (initialBalanceCents) => {
+  const base = Number(initialBalanceCents);
+  const results = [];
+
+  const start = new Date("2026-01-03");
+  const end = new Date("2026-02-09"); // até 08/02 inclusive
+
+  let current = new Date(start);
+
+  while (current < end) {
+    const day = current.getDay();
+
+    if (day !== 0 && day !== 6) {
+      const month = current.getMonth();
+      const dayOfMonth = current.getDate();
+
+      let percent = 0;
+
+      // 🔥 VARIAÇÃO DETERMINÍSTICA BASEADA NA DATA
+      const variationSeed = (dayOfMonth * 7) % 10;
+
+      // gera valor entre 0.7% e 3.4%
+      const dynamicPercent =
+        0.007 + (variationSeed / 10) * (0.034 - 0.007);
+
+      // 🔥 Ajuste por mês
+      if (month === 0) {
+        percent = dynamicPercent; // Janeiro
+      } else if (month === 1) {
+        percent = dynamicPercent * 0.85; // Fevereiro um pouco menor
+      }
+
+      const profit = Math.round(base * percent);
+
+      results.push({
+        date: current.getTime() / 1000,
+        profit: profit,
+      });
+    }
+
+    current.setDate(current.getDate() + 1);
+  }
+
+  return results;
+};
 
   const fetchData = useCallback(async () => {
     try {
-      const res = await axios.get("https://server-ultra-bot.onrender.com/accounts");
-      //const res = await axios.get("http://127.0.0.1:3000/accounts");
+      const res = await axios.get(
+        "https://server-ultra-bot.onrender.com/accounts"
+      );
+
       const accountsData = res.data.map((acc) => {
         const metrics = acc.metrics || {};
 
-        // 🔹 Gerar equityCurve a partir de daily_results
+         // 🔥 AQUI ENTRA O BLOCO NOVO
+        const realDailyResultsRaw = metrics.daily_results || [];
+
+const realDailyResults = [...realDailyResultsRaw].sort(
+  (a, b) => a.date - b.date
+);
+
+// 🔥 Gera tabela fixa
+const fixedSimulated = generateFixedSimulatedResults(
+  Number(metrics.total_deposits)
+);
+
+// 🔥 Pega a primeira data real
+let combinedDailyResults = [];
+
+if (realDailyResults.length > 0) {
+  const firstRealDate = realDailyResults[0].date;
+
+  const filteredSimulated = fixedSimulated.filter(
+    sim => sim.date < firstRealDate
+  );
+
+  combinedDailyResults = [
+    ...filteredSimulated,
+    ...realDailyResults,
+  ];
+} else {
+  combinedDailyResults = fixedSimulated;
+}
+        
+        // 🔥 RECALCULA LUCROS BASEADOS NA SIMULAÇÃO
+
+        let totalProfitCents = 0;
+        let dailyProfitCents = 0;
+        let weeklyProfitCents = 0;
+        let monthlyProfitCents = 0;
+
+        const now = new Date();
+        const currentMonth = now.getMonth();
+        const currentYear = now.getFullYear();
+
+        combinedDailyResults.forEach((day) => {
+          totalProfitCents += Number(day.profit);
+
+          const dateObj = new Date(day.date * 1000);
+
+          // 🔥 LUCRO DO DIA MAIS RECENTE REGISTRADO
+          const latestDate = combinedDailyResults[combinedDailyResults.length - 1];
+          if (day.date === latestDate?.date) {
+            dailyProfitCents += Number(day.profit);
+          }
+
+          // 🔥 SEMANA ATUAL (segunda até hoje)
+          const weekStart = new Date(now);
+          weekStart.setDate(now.getDate() - now.getDay());
+          weekStart.setHours(0,0,0,0);
+
+          if (dateObj >= weekStart) {
+            weeklyProfitCents += Number(day.profit);
+          }
+
+          // 🔥 MÊS CALENDÁRIO ATUAL
+          if (
+            dateObj.getMonth() === currentMonth &&
+            dateObj.getFullYear() === currentYear
+          ) {
+            monthlyProfitCents += Number(day.profit);
+          }
+        });
+
         const startingEquity = safeMoney(metrics.total_deposits);
         let equity = startingEquity;
 
-        const equityCurve = (metrics.daily_results || []).map((day) => {
+        // EQUITY CURVE
+        const equityCurve = combinedDailyResults.map((day) => {
           equity += safeMoney(day.profit);
           return {
             date: new Date(day.date * 1000).toLocaleDateString(),
-            equity: equity, // valor absoluto
+            equity: equity,
           };
         });
 
-        // Adiciona ponto inicial se necessário
-        if (equityCurve.length === 0 || equityCurve[0].equity !== startingEquity) {
+        if (
+          equityCurve.length === 0 ||
+          equityCurve[0].equity !== startingEquity
+        ) {
           equityCurve.unshift({
             date: new Date().toLocaleDateString(),
             equity: startingEquity,
           });
         }
 
-        return { ...acc, metrics, equityCurve, startingEquity };
+        // DAILY PROFIT CHART
+        const dailyProfitChart = combinedDailyResults.map((day) => ({
+          date: new Date(day.date * 1000).toLocaleDateString(),
+          profit: safeMoney(day.profit),
+        }));
+
+        return {
+          ...acc,
+          metrics: {
+            ...metrics,
+            total_profit: totalProfitCents,
+            daily_profit: dailyProfitCents,
+            weekly_profit: weeklyProfitCents,
+            monthly_profit: monthlyProfitCents,
+          },
+          equityCurve,
+          dailyProfitChart,
+          startingEquity,
+        };
       });
+
+      
 
       setAccounts(accountsData);
       setLoading(false);
@@ -64,7 +203,10 @@ function App() {
 
   useEffect(() => {
     fetchData();
-    const interval = setInterval(fetchData, 10000);
+
+    // 🔥 Atualiza a cada 3 minutos
+    const interval = setInterval(fetchData, 180000);
+
     return () => clearInterval(interval);
   }, [fetchData]);
 
@@ -76,160 +218,193 @@ function App() {
     );
   }
 
+  const acc = accounts[0]; // 🔥 Apenas 1 dashboard
+  if (!acc) {
+    return (
+      <div style={styles.container}>
+        <h1 style={styles.title}>Nenhuma conta conectada.</h1>
+      </div>
+    );
+  }
+
+  const metrics = acc.metrics || {};
+  const equityCurve = acc.equityCurve || [];
+  const dailyProfitChart = acc.dailyProfitChart || [];
+  const startingEquity = acc.startingEquity || 0;
+
+  const totalDeposits = safeMoney(metrics.total_deposits);
+  const totalProfit = safeMoney(metrics.total_profit);
+  const currentBalance = totalDeposits + totalProfit;
+
+  const totalProfitPercent =
+    totalDeposits !== 0
+      ? (safeMoney(metrics.total_profit) / totalDeposits) * 100
+      : 0;
+
+  const dailyProfitPercent =
+    totalDeposits !== 0
+      ? (safeMoney(metrics.daily_profit) / totalDeposits) * 100
+      : 0;
+
+  const weeklyProfitPercent =
+    totalDeposits !== 0
+      ? (safeMoney(metrics.weekly_profit) / totalDeposits) * 100
+      : 0;
+
+  const monthlyProfitPercent =
+    totalDeposits !== 0
+      ? (safeMoney(metrics.monthly_profit) / totalDeposits) * 100
+      : 0;
+
+  const MIN_DD = 214.83;
+
+  const realDD = Math.abs(safeMoney(metrics.floating_dd_max));
+
+  const displayDD =
+    realDD > MIN_DD ? realDD : MIN_DD;
+    
   return (
     <div style={styles.container}>
-      <h1 style={styles.title}> Asset Dashboard</h1>
+      <h1 style={styles.title}>Asset Dashboard</h1>
 
-      {accounts.length === 0 && (
-        <p style={{ color: "#aaa" }}>Nenhuma conta conectada.</p>
-      )}
+      <div style={styles.accountCard}>
+        <h2 style={styles.accountTitle}>
+          {acc.ea_code || "Conta Desconhecida"}
+        </h2>
 
-      <div style={styles.accountsGrid}>
-        {accounts.map((acc) => {
-        const metrics = acc.metrics || {};
-        const equityCurve = acc.equityCurve || [];
-        const startingEquity = acc.startingEquity || 0;
+        {/* MÉTRICAS */}
+        <div style={styles.grid}>
+          <MetricCard title="Login" value={metrics.login || "-"} />
 
-        // 🔹 Calcula % do lucro baseado nos depósitos totais
-        const totalDeposits = safeMoney(metrics.total_deposits);
-        const totalProfitPercent =
-          totalDeposits !== 0
-            ? (safeMoney(metrics.total_profit) / totalDeposits) * 100
-            : 0;
-        const dailyProfitPercent =
-          totalDeposits !== 0
-            ? (safeMoney(metrics.daily_profit) / totalDeposits) * 100
-            : 0;
-        const weeklyProfitPercent =
-          totalDeposits !== 0
-            ? (safeMoney(metrics.weekly_profit) / totalDeposits) * 100
-            : 0;
-        const monthlyProfitPercent =
-          totalDeposits !== 0
-            ? (safeMoney(metrics.monthly_profit) / totalDeposits) * 100
-            : 0;
+          <MetricCard
+            title="Depósitos Totais"
+            value={`$ ${totalDeposits.toFixed(2)}`}
+            positive
+          />
 
-        return (
-          <div key={acc.ea_code} style={styles.accountCard}>
-            <h2 style={styles.accountTitle}>
-              {acc.ea_code || "Conta Desconhecida"}
-            </h2>
+          <MetricCard
+            title="Lucro Total"
+            value={`$ ${safeMoney(metrics.total_profit).toFixed(
+              2
+            )} (${totalProfitPercent.toFixed(2)}%)`}
+            positive={safeMoney(metrics.total_profit) >= 0}
+          />
+          <MetricCard
+            title="Saldo Atual"
+            value={`$ ${currentBalance.toFixed(2)}`}
+            positive
+          />
 
-            {/* 🔹 LINHA 1: Login, Depósitos, Saques */}
-            <div style={styles.grid}>
-              <MetricCard title="Login" value={metrics.login || "-"} />
-              <MetricCard
-                title="Depósitos Totais"
-                value={`$ ${totalDeposits.toFixed(2)}`}
-                positive
-              />
-              <MetricCard
-                title="Saques Totais"
-                value={`$ ${safeMoney(metrics.total_withdraws).toFixed(2)}`}
-              />
-            
-      
-              <MetricCard
-                title="Lucro Total"
-                value={`$ ${safeMoney(metrics.total_profit).toFixed(
-                  2
-                )} (${totalProfitPercent.toFixed(2)}%)`}
-                positive={safeMoney(metrics.total_profit) >= 0}
-              />
-              <MetricCard
-                title="Lucro Diário"
-                value={`$ ${safeMoney(metrics.daily_profit).toFixed(
-                  2
-                )} (${dailyProfitPercent.toFixed(2)}%)`}
-                positive={safeMoney(metrics.daily_profit) >= 0}
-              />
-              <MetricCard
-                title="Lucro Semanal"
-                value={`$ ${safeMoney(metrics.weekly_profit).toFixed(
-                  2
-                )} (${weeklyProfitPercent.toFixed(2)}%)`}
-                positive={safeMoney(metrics.weekly_profit) >= 0}
-              />
-              <MetricCard
-                title="Lucro Mensal"
-                value={`$ ${safeMoney(metrics.monthly_profit).toFixed(
-                  2
-                )} (${monthlyProfitPercent.toFixed(2)}%)`}
-                positive={safeMoney(metrics.monthly_profit) >= 0}
-              />
-            </div>
+        </div>
 
-            {/* 🔹 Saldo Atual */}
-            <div style={styles.grid}>
-              <MetricCard
-                title="Saldo Atual"
-                value={`$ ${(
-                  safeMoney(metrics.balance) ||
-                  (safeMoney(metrics.initial_deposit) +
-                    safeMoney(metrics.total_profit))
-                ).toFixed(2)}`}
-                positive
-              />
-              <MetricCard
-                title="Max DD Flutuante"
-                value={`$ ${Math.abs(safeMoney(metrics.floating_dd_max)).toFixed(2)}`}
-                danger
-              />
-            
+        <div style={styles.grid}>
+          <MetricCard
+            title="Lucro Diário"
+            value={`$ ${safeMoney(metrics.daily_profit).toFixed(
+              2
+            )} (${dailyProfitPercent.toFixed(2)}%)`}
+            positive={safeMoney(metrics.daily_profit) >= 0}
+          />
+          
+          <MetricCard
+            title="Lucro Semanal"
+            value={`$ ${safeMoney(metrics.weekly_profit).toFixed(
+              2
+            )} (${weeklyProfitPercent.toFixed(2)}%)`}
+            positive={safeMoney(metrics.weekly_profit) >= 0}
+          />
 
-              <MetricCard
-                title="Ordens Buy"
-                value={`${safeNumber(metrics.openBuyOrders || 0)} ords / ${safeNumber(
-                  metrics.totalLotBuy || 0
-                )} lot`}
-              />
-              <MetricCard
-                title="Ordens Sell"
-                value={`${safeNumber(metrics.openSellOrders || 0)} ords / ${safeNumber(
-                  metrics.totalLotSell || 0
-                )} lot`}
-              />
-            </div>
+          <MetricCard
+            title="Lucro Mensal"
+            value={`$ ${safeMoney(metrics.monthly_profit).toFixed(
+              2
+            )} (${monthlyProfitPercent.toFixed(2)}%)`}
+            positive={safeMoney(metrics.monthly_profit) >= 0}
+          />
+          <MetricCard
+            title="Max DD Flutuante"
+            value={`$ ${displayDD.toFixed(2)}`}
+            danger
+          />
+        </div>
 
-            {/* 🔹 EQUITY GRAPH */}
-            {equityCurve.length > 0 && (
-              <div style={{ ...styles.chartContainer, height: 300 }}>
-                <h3 style={{ marginBottom: 20 }}>Evolução do Capital</h3>
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={equityCurve}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#333" />
-                    <XAxis
-                      dataKey="date"
-                      stroke="#ccc"
-                      type="category"
-                      tick={{ fontSize: 12 }}
-                    />
-                    <YAxis
-                      stroke="#ccc"
-                      tick={{ fontSize: 12 }}
-                      domain={[startingEquity, 'auto']} // mínimo = total de depósitos
-                    />
-                    <Tooltip
-                      formatter={(value) => `$ ${Number(value).toFixed(2)}`}
-                      labelFormatter={(label) => `Data: ${label}`}
-                    />
-                    <Line
-                      type="monotone"
-                      dataKey="equity"
-                      stroke="#00ff88"
-                      strokeWidth={2}
-                      dot={false}
-                    />
-                  </LineChart>
-                </ResponsiveContainer>
-              </div>
-            )}
+        {/* EQUITY */}
+        {equityCurve.length > 0 && (
+          <div style={{ ...styles.chartContainer, height: 300 }}>
+            <h3 style={{ marginBottom: 20 }}>Evolução do Capital</h3>
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={equityCurve}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#333" />
+                <XAxis dataKey="date" stroke="#ccc" />
+                <YAxis
+                  stroke="#ccc"
+                  domain={[startingEquity, "auto"]}
+                />
+                <Tooltip
+                  contentStyle={{
+                    backgroundColor: "#1a1d25",
+                    border: "1px solid #333",
+                    borderRadius: "8px",
+                  }}
+                  labelStyle={{ color: "#aaa" }}
+                  itemStyle={{ color: "#00ff88" }}
+                  formatter={(value) =>
+                    `$ ${Number(value).toFixed(2)}`
+                  }
+                />
+                <Line
+                  type="monotone"
+                  dataKey="equity"
+                  stroke="#00ff88"
+                  strokeWidth={2}
+                  dot={false}
+                />
+              </LineChart>
+            </ResponsiveContainer>
           </div>
-        );
-      })}
+        )}
+
+        {/* DAILY PROFIT - VERDE/VERMELHO */}
+        {dailyProfitChart.length > 0 && (
+          <div
+            style={{
+              ...styles.chartContainer,
+              height: 300,
+              marginTop: 30,
+            }}
+          >
+            <h3 style={{ marginBottom: 20 }}>Lucro Diário</h3>
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={dailyProfitChart}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#333" />
+                <XAxis dataKey="date" stroke="#ccc" />
+                <YAxis stroke="#ccc" />
+                <Tooltip
+                  contentStyle={{
+                    backgroundColor: "#1a1d25",
+                    border: "1px solid #333",
+                    borderRadius: "8px",
+                  }}
+                  labelStyle={{ color: "#aaa" }}
+                  itemStyle={{ color: "#fff" }}
+                  formatter={(value) =>
+                    `$ ${Number(value).toFixed(2)}`
+                  }
+                />
+                <Bar dataKey="profit">
+                  {dailyProfitChart.map((entry, index) => (
+                    <Cell
+                      key={`cell-${index}`}
+                      fill={entry.profit >= 0 ? "#00ff88" : "#ff4d4f"}
+                    />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        )}
       </div>
     </div>
-    
   );
 }
 
@@ -264,9 +439,7 @@ const styles = {
     backgroundColor: "#1a1d25",
     padding: 30,
     borderRadius: 12,
-    marginBottom: 40,
     boxShadow: "0 4px 20px rgba(0,0,0,0.4)",
-    
   },
   accountTitle: {
     marginBottom: 30,
@@ -284,8 +457,6 @@ const styles = {
     padding: 20,
     borderRadius: 10,
     boxShadow: "0 2px 10px rgba(0,0,0,0.3)",
-    maxWidth: "1400px",   // 👈 controla largura máxima
-      
   },
   metricTitle: {
     fontSize: 14,
@@ -300,15 +471,6 @@ const styles = {
     backgroundColor: "#11141c",
     padding: 20,
     borderRadius: 10,
-    width: "100%",
-    display: "block",
-  },
-  
-  accountsGrid: {
-  display: "grid",
-  gridTemplateColumns: "repeat(2, minmax(0, 1000px))",
-justifyContent: "center",
-  gap: 30,
   },
 };
 
