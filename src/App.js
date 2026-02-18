@@ -26,8 +26,8 @@ function App() {
 
   const fetchData = useCallback(async () => {
     try {
-      //const res = await axios.get("https://dashboard-mt5-server.onrender.com/accounts");
-      const res = await axios.get("http://127.0.0.1:3000/accounts");
+      const res = await axios.get("https://server-ultra-bot.onrender.com/accounts");
+      //const res = await axios.get("http://127.0.0.1:3000/accounts");
       const accountsData = res.data.map((acc) => {
         const metrics = acc.metrics || {};
 
