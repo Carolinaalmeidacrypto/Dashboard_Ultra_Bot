@@ -22,47 +22,53 @@ function App() {
     return Number(value) / 100;
   };
 
-  // 🔥 GERA RESULTADOS SIMULADOS DESDE 2 DE JANEIRO
-  const generateFixedSimulatedResults = (initialBalanceCents) => {
+  // 🔥 RANDOM DETERMINÍSTICO (seeded)
+function mulberry32(seed) {
+  return function () {
+    let t = (seed += 0x6d2b79f5);
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+const generateFixedSimulatedResults = (initialBalanceCents) => {
+  const base = Number(initialBalanceCents);
   const results = [];
 
   const start = new Date("2026-01-03");
   const end = new Date("2026-02-09");
 
-  let current = new Date(start);
-
-  // intervalo fixo em dólares
   const MIN_PROFIT = 4.86;
   const MAX_PROFIT = 36.45;
 
-  // guardamos último valor para leve suavização
+  // 🔥 seed baseada no saldo (sempre igual para mesma conta)
+  const seed = Math.floor(base);
+  const random = mulberry32(seed);
+
+  let current = new Date(start);
   let lastProfit = null;
 
   while (current < end) {
     const day = current.getDay();
 
-    // ignora sábado e domingo
     if (day !== 0 && day !== 6) {
-      // 🔥 valor totalmente aleatório dentro do range
-      let randomProfit =
-        MIN_PROFIT + Math.random() * (MAX_PROFIT - MIN_PROFIT);
+      let profit;
 
-      // 🔥 pequena suavização para não parecer totalmente artificial
-      if (lastProfit !== null) {
-        const blendFactor = 0.3; // 0 = totalmente aleatório | 1 = totalmente igual ao anterior
-        randomProfit =
-          lastProfit * blendFactor +
-          randomProfit * (1 - blendFactor);
-      }
+      // 🔥 força variação real e evita valores próximos
+      do {
+        const r = random();
+        profit = MIN_PROFIT + r * (MAX_PROFIT - MIN_PROFIT);
+      } while (
+        lastProfit !== null &&
+        Math.abs(profit - lastProfit) < 3
+      );
 
-      // arredonda para centavos
-      randomProfit = Number(randomProfit.toFixed(2));
-
-      lastProfit = randomProfit;
+      lastProfit = profit;
 
       results.push({
         date: current.getTime() / 1000,
-        profit: Math.round(randomProfit * 100), // volta para centavos
+        profit: Math.round(profit * 100),
       });
     }
 
