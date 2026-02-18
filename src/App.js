@@ -24,42 +24,45 @@ function App() {
 
   // 🔥 GERA RESULTADOS SIMULADOS DESDE 2 DE JANEIRO
   const generateFixedSimulatedResults = (initialBalanceCents) => {
-  const base = Number(initialBalanceCents);
   const results = [];
 
   const start = new Date("2026-01-03");
-  const end = new Date("2026-02-09"); // até 08/02 inclusive
+  const end = new Date("2026-02-09");
 
   let current = new Date(start);
+
+  // intervalo fixo em dólares
+  const MIN_PROFIT = 4.86;
+  const MAX_PROFIT = 36.45;
+
+  // guardamos último valor para leve suavização
+  let lastProfit = null;
 
   while (current < end) {
     const day = current.getDay();
 
+    // ignora sábado e domingo
     if (day !== 0 && day !== 6) {
-      const month = current.getMonth();
-      const dayOfMonth = current.getDate();
+      // 🔥 valor totalmente aleatório dentro do range
+      let randomProfit =
+        MIN_PROFIT + Math.random() * (MAX_PROFIT - MIN_PROFIT);
 
-      let percent = 0;
-
-      // 🔥 VARIAÇÃO DETERMINÍSTICA BASEADA NA DATA
-      const variationSeed = (dayOfMonth * 7) % 10;
-
-      // gera valor entre 0.7% e 3.4%
-      const dynamicPercent =
-        0.007 + (variationSeed / 10) * (0.034 - 0.007);
-
-      // 🔥 Ajuste por mês
-      if (month === 0) {
-        percent = dynamicPercent; // Janeiro
-      } else if (month === 1) {
-        percent = dynamicPercent * 0.85; // Fevereiro um pouco menor
+      // 🔥 pequena suavização para não parecer totalmente artificial
+      if (lastProfit !== null) {
+        const blendFactor = 0.3; // 0 = totalmente aleatório | 1 = totalmente igual ao anterior
+        randomProfit =
+          lastProfit * blendFactor +
+          randomProfit * (1 - blendFactor);
       }
 
-      const profit = Math.round(base * percent);
+      // arredonda para centavos
+      randomProfit = Number(randomProfit.toFixed(2));
+
+      lastProfit = randomProfit;
 
       results.push({
         date: current.getTime() / 1000,
-        profit: profit,
+        profit: Math.round(randomProfit * 100), // volta para centavos
       });
     }
 
@@ -262,7 +265,7 @@ if (realDailyResults.length > 0) {
 
   const displayDD =
     realDD > MIN_DD ? realDD : MIN_DD;
-    
+
   return (
     <div style={styles.container}>
       <h1 style={styles.title}>Asset Dashboard</h1>
