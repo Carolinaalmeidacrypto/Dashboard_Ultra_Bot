@@ -32,17 +32,19 @@ function mulberry32(seed) {
   };
 }
 
+// CONFIGURAÇÃO
+const SKIP_WEEKENDS = false; 
+
 const generateFixedSimulatedResults = (initialBalanceCents) => {
   const base = Number(initialBalanceCents);
   const results = [];
 
   const start = new Date("2026-01-03");
-  const end = new Date("2026-02-09");
+  const end = new Date("2026-03-10");
 
-  const MIN_PROFIT = 4.86;
-  const MAX_PROFIT = 36.45;
+  const MIN_PERCENT = 0.02;
+  const MAX_PERCENT = 0.025;
 
-  // 🔥 seed baseada no saldo (sempre igual para mesma conta)
   const seed = Math.floor(base);
   const random = mulberry32(seed);
 
@@ -52,24 +54,24 @@ const generateFixedSimulatedResults = (initialBalanceCents) => {
   while (current < end) {
     const day = current.getDay();
 
-    if (day !== 0 && day !== 6) {
-      let profit;
+    if (!SKIP_WEEKENDS || (day !== 0 && day !== 6)) {
 
-      // 🔥 força variação real e evita valores próximos
-      do {
-        const r = random();
-        profit = MIN_PROFIT + r * (MAX_PROFIT - MIN_PROFIT);
-      } while (
-        lastProfit !== null &&
-        Math.abs(profit - lastProfit) < 3
-      );
+      const percent =
+        MIN_PERCENT + random() * (MAX_PERCENT - MIN_PERCENT);
 
-      lastProfit = profit;
+      const profit = base * percent;
 
-      results.push({
-        date: current.getTime() / 1000,
-        profit: Math.round(profit * 100),
-      });
+      if (
+        lastProfit === null ||
+        Math.abs(profit - lastProfit) > base * 0.001
+      ) {
+        lastProfit = profit;
+
+        results.push({
+          date: current.getTime() / 1000,
+          profit: Math.round(profit),
+        });
+      }
     }
 
     current.setDate(current.getDate() + 1);
@@ -94,6 +96,26 @@ const realDailyResults = [...realDailyResultsRaw].sort(
   (a, b) => a.date - b.date
 );
 
+const baseDeposit = Number(metrics.total_deposits);
+
+const adjustedRealResults = realDailyResults.map((day) => {
+  const profit = Number(day.profit);
+
+  const percent = profit / baseDeposit;
+
+  if (percent > 0.02) {
+    const randomPercent =
+      0.02 + Math.random() * (0.025 - 0.02);
+
+    return {
+      ...day,
+      profit: Math.round(baseDeposit * randomPercent),
+    };
+  }
+
+  return day;
+});
+
 // 🔥 Gera tabela fixa
 const fixedSimulated = generateFixedSimulatedResults(
   Number(metrics.total_deposits)
@@ -111,7 +133,7 @@ if (realDailyResults.length > 0) {
 
   combinedDailyResults = [
     ...filteredSimulated,
-    ...realDailyResults,
+    ...adjustedRealResults,
   ];
 } else {
   combinedDailyResults = fixedSimulated;
