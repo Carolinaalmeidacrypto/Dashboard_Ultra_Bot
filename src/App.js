@@ -63,17 +63,10 @@ const generateFixedSimulatedResults = (initialBalanceCents) => {
 
       const profit = base * percent;
 
-      if (
-        lastProfit === null ||
-        Math.abs(profit - lastProfit) > base * 0.001
-      ) {
-        lastProfit = profit;
-
-        results.push({
-          date: current.getTime() / 1000,
-          profit: Math.round(profit),
-        });
-      }
+      results.push({
+        date: current.getTime() / 1000,
+        profit: Math.round(profit),
+      });
     }
 
     current.setUTCDate(current.getUTCDate() + 1);
@@ -99,10 +92,11 @@ const realDailyResults = [...realDailyResultsRaw].sort(
 );
 
 const baseDeposit = Number(metrics.total_deposits);
+const fixedBaseDeposit = baseDeposit;
 
 const adjustedRealResults = realDailyResults.map((day) => {
   const profit = Number(day.profit);
-  const percent = profit / baseDeposit;
+  const percent = profit / fixedBaseDeposit;
 
   if (percent > 0.02) {
 
@@ -114,7 +108,7 @@ const adjustedRealResults = realDailyResults.map((day) => {
 
     return {
       ...day,
-      profit: Math.round(baseDeposit * randomPercent),
+      profit: Math.round(fixedBaseDeposit * randomPercent),
     };
   }
 
@@ -123,7 +117,7 @@ const adjustedRealResults = realDailyResults.map((day) => {
 
 // 🔥 Gera tabela fixa
 const fixedSimulated = generateFixedSimulatedResults(
-  Number(metrics.total_deposits)
+  fixedBaseDeposit
 );
 
 // 🔥 Pega a primeira data real
@@ -167,35 +161,41 @@ let combinedDailyResults = [];
         yearStart.setHours(0,0,0,0);
 
         // 🔥 início da semana (segunda-feira)
-        const weekStart = new Date(now);
-        const currentDay = now.getDay();
-        const diff = (currentDay === 0 ? -6 : 1) - currentDay;
+        const weekStart = new Date();
+        weekStart.setUTCHours(0,0,0,0);
 
-        weekStart.setDate(now.getDate() + diff);
-        weekStart.setHours(0,0,0,0);
+        const day = weekStart.getUTCDay();
+        const diff = (day === 0 ? -6 : 1) - day;
+
+        weekStart.setUTCDate(weekStart.getUTCDate() + diff);
 
         combinedDailyResults.forEach((dayData) => {
 
           totalProfitCents += Number(dayData.profit);
 
           const dateObj = new Date(dayData.date * 1000);
+          dateObj.setUTCHours(0,0,0,0);
 
           // 🔥 LUCRO DO DIA MAIS RECENTE
-          const latestDate = combinedDailyResults[combinedDailyResults.length - 1];
+          const latestDate = combinedDailyResults.reduce((a,b)=> a.date > b.date ? a : b);
           if (dayData.date === latestDate?.date) {
             dailyProfitCents += Number(dayData.profit);
           }
 
           // 🔥 LUCRO SEMANAL
-          if (dateObj >= weekStart) {
+          const today = new Date();
+          today.setUTCHours(23,59,59,999);
+
+          if (dateObj >= weekStart && dateObj <= today) {
             weeklyProfitCents += Number(dayData.profit);
           }
 
           // 🔥 LUCRO MENSAL
-          if (
-            dateObj.getMonth() === currentMonth &&
-            dateObj.getFullYear() === currentYear
-          ) {
+          const monthStart = new Date(Date.UTC(currentYear, currentMonth, 1));
+          const monthEnd = new Date();
+          monthEnd.setUTCHours(23,59,59,999);
+
+          if (dateObj >= monthStart && dateObj <= monthEnd) {
             monthlyProfitCents += Number(dayData.profit);
           }
 
@@ -234,6 +234,27 @@ let combinedDailyResults = [];
           profit: safeMoney(day.profit),
         }));
 
+        // 🔥 CALCULAR LUCRO POR MÊS
+        const monthlyTable = new Array(12).fill(null).map(() => ({
+          profit: 0,
+          percent: 0,
+        }));
+
+        combinedDailyResults.forEach((day) => {
+
+          const dateObj = new Date(day.date * 1000);
+          const month = dateObj.getMonth();
+
+          monthlyTable[month].profit += safeMoney(day.profit);
+
+        });
+
+        monthlyTable.forEach((m) => {
+          if (startingEquity !== 0) {
+            m.percent = (m.profit / startingEquity) * 100;
+          }
+        });
+
         return {
           ...acc,
           metrics: {
@@ -247,6 +268,7 @@ let combinedDailyResults = [];
           equityCurve,
           dailyProfitChart,
           startingEquity,
+          monthlyTable, // 🔥 NOVO
         };
       });
 
@@ -286,6 +308,11 @@ let combinedDailyResults = [];
     );
   }
 
+  const months = [
+  "Jan","Fev","Mar","Abr","Mai","Jun",
+  "Jul","Ago","Set","Out","Nov","Dez"
+  ];
+
   const metrics = acc.metrics || {};
   const formatDate = (date) => date.toLocaleDateString("pt-BR");
 
@@ -315,7 +342,7 @@ let combinedDailyResults = [];
   const dailyProfitChart = acc.dailyProfitChart || [];
   const startingEquity = acc.startingEquity || 0;
 
-  const totalDeposits = safeMoney(metrics.total_deposits);
+  const totalDeposits = acc.startingEquity;
   const totalProfit = safeMoney(metrics.total_profit);
   const currentBalance = totalDeposits + totalProfit;
 
@@ -415,6 +442,35 @@ let combinedDailyResults = [];
             danger
           />
         </div>
+
+        {/* TABELA MENSAL */}
+          {acc.monthlyTable && (
+            <div style={{...styles.chartContainer, marginTop: 30}}>
+              <h3 style={{ marginBottom: 20 }}>Lucro Mensal</h3>
+
+              <table style={styles.table}>
+                <thead>
+                  <tr>
+                    {months.map((m) => (
+                      <th key={m} style={styles.th}>{m}</th>
+                    ))}
+                  </tr>
+                </thead>
+
+                <tbody>
+                  <tr>
+                    {acc.monthlyTable.map((m, i) => (
+                      <td key={i} style={styles.td}>
+                        ${m.profit.toFixed(2)}
+                        <br/>
+                        ({m.percent.toFixed(2)}%)
+                      </td>
+                    ))}
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          )}
 
         {/* EQUITY */}
         {equityCurve.length > 0 && (
@@ -559,6 +615,24 @@ const styles = {
     backgroundColor: "#11141c",
     padding: 20,
     borderRadius: 10,
+  },
+  table: {
+  width: "100%",
+  borderCollapse: "collapse",
+  },
+
+  th: {
+    padding: 10,
+    borderBottom: "1px solid #333",
+    color: "#aaa",
+    fontSize: 14,
+  },
+
+  td: {
+    padding: 12,
+    textAlign: "center",
+    borderBottom: "1px solid #222",
+    fontSize: 14,
   },
 };
 
