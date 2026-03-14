@@ -41,6 +41,8 @@ const generateFixedSimulatedResults = (initialBalanceCents) => {
 
   const start = new Date("2026-01-03");
   const end = new Date("2026-03-10");
+  end.setUTCHours(0,0,0,0);
+  end.setUTCDate(end.getUTCDate() + 1);
 
   const MIN_PERCENT = 0.02;
   const MAX_PERCENT = 0.025;
@@ -52,7 +54,7 @@ const generateFixedSimulatedResults = (initialBalanceCents) => {
   let lastProfit = null;
 
   while (current < end) {
-    const day = current.getDay();
+    const day = current.getUTCDay();
 
     if (!SKIP_WEEKENDS || (day !== 0 && day !== 6)) {
 
@@ -74,7 +76,7 @@ const generateFixedSimulatedResults = (initialBalanceCents) => {
       }
     }
 
-    current.setDate(current.getDate() + 1);
+    current.setUTCDate(current.getUTCDate() + 1);
   }
 
   return results;
@@ -100,12 +102,15 @@ const baseDeposit = Number(metrics.total_deposits);
 
 const adjustedRealResults = realDailyResults.map((day) => {
   const profit = Number(day.profit);
-
   const percent = profit / baseDeposit;
 
   if (percent > 0.02) {
+
+    const seed = Math.floor(baseDeposit + day.date);
+    const random = mulberry32(seed);
+
     const randomPercent =
-      0.02 + Math.random() * (0.025 - 0.02);
+      0.02 + random() * (0.025 - 0.02);
 
     return {
       ...day,
@@ -124,20 +129,26 @@ const fixedSimulated = generateFixedSimulatedResults(
 // 🔥 Pega a primeira data real
 let combinedDailyResults = [];
 
-if (realDailyResults.length > 0) {
-  const firstRealDate = realDailyResults[0].date;
+  if (realDailyResults.length > 0) {
 
-  const filteredSimulated = fixedSimulated.filter(
-    sim => sim.date < firstRealDate
-  );
+    const SIMULATION_END = new Date("2026-03-10").getTime() / 1000;
 
-  combinedDailyResults = [
-    ...filteredSimulated,
-    ...adjustedRealResults,
-  ];
-} else {
-  combinedDailyResults = fixedSimulated;
-}
+    const filteredSimulated = fixedSimulated.filter(
+      sim => sim.date <= SIMULATION_END
+    );
+
+    const filteredReal = adjustedRealResults.filter(
+      real => real.date > SIMULATION_END
+    );
+
+    combinedDailyResults = [
+      ...filteredSimulated,
+      ...filteredReal,
+    ];
+
+  } else {
+    combinedDailyResults = fixedSimulated;
+  }
         
         // 🔥 RECALCULA LUCROS BASEADOS NA SIMULAÇÃO
 
@@ -145,38 +156,54 @@ if (realDailyResults.length > 0) {
         let dailyProfitCents = 0;
         let weeklyProfitCents = 0;
         let monthlyProfitCents = 0;
+        let yearlyProfitCents = 0;
 
         const now = new Date();
         const currentMonth = now.getMonth();
         const currentYear = now.getFullYear();
+        
+        // 🔥 início do ano
+        const yearStart = new Date(currentYear, 0, 1);
+        yearStart.setHours(0,0,0,0);
 
-        combinedDailyResults.forEach((day) => {
-          totalProfitCents += Number(day.profit);
+        // 🔥 início da semana (segunda-feira)
+        const weekStart = new Date(now);
+        const currentDay = now.getDay();
+        const diff = (currentDay === 0 ? -6 : 1) - currentDay;
 
-          const dateObj = new Date(day.date * 1000);
+        weekStart.setDate(now.getDate() + diff);
+        weekStart.setHours(0,0,0,0);
 
-          // 🔥 LUCRO DO DIA MAIS RECENTE REGISTRADO
+        combinedDailyResults.forEach((dayData) => {
+
+          totalProfitCents += Number(dayData.profit);
+
+          const dateObj = new Date(dayData.date * 1000);
+
+          // 🔥 LUCRO DO DIA MAIS RECENTE
           const latestDate = combinedDailyResults[combinedDailyResults.length - 1];
-          if (day.date === latestDate?.date) {
-            dailyProfitCents += Number(day.profit);
+          if (dayData.date === latestDate?.date) {
+            dailyProfitCents += Number(dayData.profit);
           }
 
-          // 🔥 SEMANA ATUAL (segunda até hoje)
-          const weekStart = new Date(now);
-          weekStart.setDate(now.getDate() - now.getDay());
-          weekStart.setHours(0,0,0,0);
-
+          // 🔥 LUCRO SEMANAL
           if (dateObj >= weekStart) {
-            weeklyProfitCents += Number(day.profit);
+            weeklyProfitCents += Number(dayData.profit);
           }
 
-          // 🔥 MÊS CALENDÁRIO ATUAL
+          // 🔥 LUCRO MENSAL
           if (
             dateObj.getMonth() === currentMonth &&
             dateObj.getFullYear() === currentYear
           ) {
-            monthlyProfitCents += Number(day.profit);
+            monthlyProfitCents += Number(dayData.profit);
           }
+
+          // 🔥 LUCRO ANUAL
+          if (dateObj >= yearStart) {
+            yearlyProfitCents += Number(dayData.profit);
+          }
+
         });
 
         const startingEquity = safeMoney(metrics.total_deposits);
@@ -186,7 +213,7 @@ if (realDailyResults.length > 0) {
         const equityCurve = combinedDailyResults.map((day) => {
           equity += safeMoney(day.profit);
           return {
-            date: new Date(day.date * 1000).toLocaleDateString(),
+            date: new Date(day.date * 1000).toISOString().slice(0,10),
             equity: equity,
           };
         });
@@ -203,7 +230,7 @@ if (realDailyResults.length > 0) {
 
         // DAILY PROFIT CHART
         const dailyProfitChart = combinedDailyResults.map((day) => ({
-          date: new Date(day.date * 1000).toLocaleDateString(),
+          date: new Date(day.date * 1000).toISOString().slice(0,10),
           profit: safeMoney(day.profit),
         }));
 
@@ -215,6 +242,7 @@ if (realDailyResults.length > 0) {
             daily_profit: dailyProfitCents,
             weekly_profit: weeklyProfitCents,
             monthly_profit: monthlyProfitCents,
+            yearly_profit: yearlyProfitCents,
           },
           equityCurve,
           dailyProfitChart,
@@ -259,6 +287,30 @@ if (realDailyResults.length > 0) {
   }
 
   const metrics = acc.metrics || {};
+  const formatDate = (date) => date.toLocaleDateString("pt-BR");
+
+  const now = new Date();
+  const currentMonth = now.getMonth();
+  const currentYear = now.getFullYear();
+
+  // semana (segunda)
+  const weekStart = new Date(now);
+  const currentDay = now.getDay();
+  const diff = (currentDay === 0 ? -6 : 1) - currentDay;
+  weekStart.setDate(now.getDate() + diff);
+
+  const weekStartText = formatDate(weekStart);
+  const weekEndText = formatDate(now);
+
+  // mês
+  const monthStart = new Date(currentYear, currentMonth, 1);
+  const monthStartText = formatDate(monthStart);
+  const monthEndText = formatDate(now);
+
+  // ano
+  const yearStart = new Date(currentYear, 0, 1);
+  const yearStartText = formatDate(yearStart);
+  const yearEndText = formatDate(now);
   const equityCurve = acc.equityCurve || [];
   const dailyProfitChart = acc.dailyProfitChart || [];
   const startingEquity = acc.startingEquity || 0;
@@ -285,6 +337,11 @@ if (realDailyResults.length > 0) {
   const monthlyProfitPercent =
     totalDeposits !== 0
       ? (safeMoney(metrics.monthly_profit) / totalDeposits) * 100
+      : 0;
+
+  const yearlyProfitPercent =
+    totalDeposits !== 0
+      ? (safeMoney(metrics.yearly_profit) / totalDeposits) * 100
       : 0;
 
   const MIN_DD = 214.83;
@@ -338,7 +395,7 @@ if (realDailyResults.length > 0) {
           />
           
           <MetricCard
-            title="Lucro Semanal"
+            title={`Lucro Semanal (${weekStartText} - ${weekEndText})`}
             value={`$ ${safeMoney(metrics.weekly_profit).toFixed(
               2
             )} (${weeklyProfitPercent.toFixed(2)}%)`}
@@ -346,7 +403,7 @@ if (realDailyResults.length > 0) {
           />
 
           <MetricCard
-            title="Lucro Mensal"
+            title={`Lucro Mensal (${monthStartText} - ${monthEndText})`}
             value={`$ ${safeMoney(metrics.monthly_profit).toFixed(
               2
             )} (${monthlyProfitPercent.toFixed(2)}%)`}
